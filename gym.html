@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Gym Tracker Pro++ v3</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+  font-family: Arial;
+  background: #0f172a;
+  color: white;
+  text-align: center;
+}
+
+input, select {
+  display: block;
+  margin: 10px auto;
+  padding: 10px;
+  width: 250px;
+  border-radius: 8px;
+  border: none;
+}
+
+button {
+  padding: 10px 20px;
+  background: #22c55e;
+  border: none;
+  border-radius: 8px;
+  color: white;
+  cursor: pointer;
+  margin: 5px;
+}
+
+button.delete-btn {
+  background: #f87171;
+  margin-top: 5px;
+}
+
+.card {
+  background: #1e293b;
+  margin: 10px auto;
+  padding: 10px;
+  width: 320px;
+  border-radius: 10px;
+  text-align: left;
+}
+
+canvas {
+  background: white;
+  border-radius: 10px;
+  margin-top: 20px;
+}
+</style>
+</head>
+
+<body>
+
+<div id="auth">
+  <h2>Login / Sign Up</h2>
+  <input id="username" placeholder="Username">
+  <input id="password" type="password" placeholder="Password">
+  <button onclick="signup()">Sign Up</button>
+  <button onclick="login()">Login</button>
+</div>
+
+<div id="app" style="display:none;">
+  <h2>🏋️ Gym Tracker Pro++ v3</h2>
+
+  <input id="exercise" placeholder="Exercise">
+  <select id="muscle">
+    <option>Chest</option>
+    <option>Back</option>
+    <option>Legs</option>
+    <option>Shoulders</option>
+    <option>Arms</option>
+  </select>
+  <input id="weight" type="number" placeholder="Weight">
+  <input id="reps" type="number" placeholder="Reps">
+
+  <button onclick="addWorkout()">Add</button>
+  <button onclick="logout()">Logout</button>
+
+  <div id="workouts"></div>
+
+  <select id="exerciseFilter" onchange="filterChart()">
+    <option value="all">All Exercises</option>
+  </select>
+
+  <canvas id="chart" width="300" height="200"></canvas>
+</div>
+
+<script>
+let currentUser = null;
+let chart;
+
+const muscleColors = {
+  Chest: '#f87171',
+  Back: '#60a5fa',
+  Legs: '#fbbf24',
+  Shoulders: '#34d399',
+  Arms: '#a78bfa'
+};
+
+// Signup / Login
+function signup() {
+  const user = username.value;
+  const pass = password.value;
+  if (!user || !pass) return alert("Fill all fields");
+  if (localStorage.getItem(user)) return alert("User already exists");
+  localStorage.setItem(user, JSON.stringify({ password: pass, workouts: [] }));
+  alert("Account created!");
+}
+
+function login() {
+  const user = username.value;
+  const pass = password.value;
+  const data = JSON.parse(localStorage.getItem(user));
+  if (!data || data.password !== pass) return alert("Wrong login");
+  currentUser = user;
+  auth.style.display = "none";
+  app.style.display = "block";
+  loadWorkouts();
+}
+
+function logout() { location.reload(); }
+
+// Add / Delete workouts
+function addWorkout() {
+  const data = JSON.parse(localStorage.getItem(currentUser));
+  data.workouts.push({
+    exercise: exercise.value,
+    muscle: muscle.value,
+    weight: Number(weight.value),
+    reps: Number(reps.value),
+    difficulty: "neutral",
+    date: new Date().toLocaleDateString()
+  });
+  localStorage.setItem(currentUser, JSON.stringify(data));
+  loadWorkouts();
+}
+
+function deleteWorkout(index) {
+  const data = JSON.parse(localStorage.getItem(currentUser));
+  data.workouts.splice(index, 1);
+  localStorage.setItem(currentUser, JSON.stringify(data));
+  loadWorkouts();
+}
+
+function setDifficulty(index, value) {
+  const data = JSON.parse(localStorage.getItem(currentUser));
+  data.workouts[index].difficulty = value;
+  localStorage.setItem(currentUser, JSON.stringify(data));
+  loadWorkouts();
+}
+
+// Advice + Suggested Weight/Reps based on difficulty
+function getAdvice(workouts, current) {
+  const last = workouts.filter(w => w.exercise === current.exercise).slice(-1)[0];
+  if (!last) return { advice: "⚪ No data yet", suggestedWeight: "-", suggestedReps: "-" };
+
+  let weightAdj = 0;
+  let suggestedReps = 10;
+
+  if (last.difficulty === "easy") {
+    weightAdj = last.reps >= 8 ? 2.5 : 1.25;
+    suggestedReps = Math.min(last.reps + 2, 12);
+  } else if (last.difficulty === "difficult") {
+    weightAdj = -2.5;
+    suggestedReps = Math.max(last.reps - 2, 6);
+  } else { // neutral
+    if (last.reps >= 12) weightAdj = 5;
+    else if (last.reps >= 8) weightAdj = 2.5;
+    suggestedReps = last.reps >= 8 ? Math.min(last.reps + 2, 12) : Math.max(last.reps - 1, 6);
+  }
+
+  const advice = last.reps >= 8 ? "🟢 Increase weight" : "🔴 Too heavy";
+  return { advice, suggestedWeight: Math.max(0, last.weight + weightAdj) + " kg", suggestedReps: suggestedReps + " reps" };
+}
+
+// Load workouts
+function loadWorkouts() {
+  const container = document.getElementById("workouts");
+  container.innerHTML = "";
+
+  const data = JSON.parse(localStorage.getItem(currentUser));
+
+  // Update filter
+  const filter = document.getElementById("exerciseFilter");
+  const exercises = [...new Set(data.workouts.map(w => w.exercise))];
+  filter.innerHTML = '<option value="all">All Exercises</option>';
+  exercises.forEach(ex => filter.innerHTML += `<option value="${ex}">${ex}</option>`);
+
+  data.workouts.forEach((w, i) => {
+    const { advice, suggestedWeight, suggestedReps } = getAdvice(data.workouts, w);
+    container.innerHTML += `
+      <div class="card">
+        <h3>${w.exercise}</h3>
+        <p>${w.muscle}</p>
+        <p>${w.weight} kg × ${w.reps}</p>
+        <small>${w.date}</small>
+        <p><b>${advice}</b></p>
+        <p>Suggested weight: <b>${suggestedWeight}</b></p>
+        <p>Suggested reps: <b>${suggestedReps}</b></p>
+        <p>Difficulty: 
+          <select onchange="setDifficulty(${i}, this.value)">
+            <option value="neutral" ${w.difficulty==='neutral'?'selected':''}>Neutral</option>
+            <option value="easy" ${w.difficulty==='easy'?'selected':''}>Easy</option>
+            <option value="difficult" ${w.difficulty==='difficult'?'selected':''}>Difficult</option>
+          </select>
+        </p>
+        <button class="delete-btn" onclick="deleteWorkout(${i})">Delete</button>
+      </div>
+    `;
+  });
+
+  updateChart(data.workouts, "all");
+}
+
+// Chart
+function updateChart(workouts, selectedExercise = "all") {
+  let filtered = workouts;
+  if (selectedExercise !== "all") filtered = workouts.filter(w => w.exercise === selectedExercise);
+
+  const labels = filtered.map(w => w.date);
+  const weights = filtered.map(w => w.weight);
+  const colors = filtered.map(w => muscleColors[w.muscle] || '#ffffff');
+
+  if (chart) chart.destroy();
+  chart = new Chart(document.getElementById("chart"), {
+    type: "bar",
+    data: { labels, datasets: [{ label: selectedExercise === "all" ? "All Exercises" : selectedExercise, data: weights, backgroundColor: colors, borderColor:'#000', borderWidth:1 }] },
+    options: { scales: { y: { beginAtZero:true } } }
+  });
+}
+
+function filterChart() {
+  const selected = document.getElementById("exerciseFilter").value;
+  const data = JSON.parse(localStorage.getItem(currentUser));
+  updateChart(data.workouts, selected);
+}
+</script>
+</body>
+</html>
